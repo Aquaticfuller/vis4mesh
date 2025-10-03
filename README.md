@@ -39,8 +39,8 @@ We provided 2 demos under `vis4mesh/visdata`. The data is compressed in zip form
 
 After decompressing, the provided data could be used in Vis4Mesh. Just click the button on the left top in Vis4Mesh main page, and choose to **upload the whole data directory**. For our provided datasets, upload either `conv2d-transfer-32x32` or `fir-100000-transfer` **directory**. Now the data is displayed dynamicly in Vis4Mesh.
 
-<!-- 
-<details><summary>Previous example on FIR benchmark with Vis4Mesh v0.2.3</summary><img alt="vis4mesh-v2-demo" src="https://github.com/ueqri/vis4mesh/blob/main/doc/v0.2.3.png?raw=true"></details> -->
+
+<details><summary>Previous example on FIR benchmark with Vis4Mesh v0.2.3</summary><img alt="vis4mesh-v2-demo" src="https://github.com/ueqri/vis4mesh/blob/main/doc/v0.2.3.png?raw=true"></details>
 
 ### Integration with Daisen
 

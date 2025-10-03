@@ -5,6 +5,8 @@ export interface MetaData {
   elapse: number;
   hops_per_unit: number;
   num_hop_units: number;
+  num_channels?: number;
+  channel_labels?: string[];
 }
 
 export interface NodeData {

@@ -1,3 +1,4 @@
+// src/index.ts
 import "../public/index.scss";
 import Controller from "controller/controller";
 import { Component, Element, Module } from "global";
@@ -22,7 +23,7 @@ if (supported) {
 
 chooseDirButton.addEventListener("click", async () => {
   try {
-    const meta = await port.init();
+    const meta: any = await port.init(); // meta.json from uploaded directory
     chooseDirButton.remove();
 
     console.log(meta);
@@ -30,19 +31,30 @@ chooseDirButton.addEventListener("click", async () => {
 
     register_daisen_insight(daisen_button, graph);
 
-    let c = new Controller(port, graph).loadModules([
+    const c = new Controller(port, graph).loadModules([
       Module.filterMsg,
       Module.setTime,
     ]);
 
     Component.ticker.setMaxTime(+meta["elapse"]).bindController(c);
 
-    // c.requestDataPort(); // render initial view
+    // c.requestDataPort(); // render initial view if you want a 0..0 frame
 
     RenderTopbar();
     RenderTimebar();
     RenderFilterbar();
+
+    // --- pass meta-derived signals to filter bars ---
+    // 1) Tell the hops filter how wide each hop bucket is
     Element.filterbar.signal["num_hops_per_unit"](meta.hops_per_unit);
+
+    // 2) Tell the (new) channel filter how many physical NoC channels exist
+    //    and (optionally) their labels if provided by meta.json
+    Element.filterbar.signal["num_channels"]?.({
+      n: meta.num_channels ?? 1,
+      labels: meta.channel_labels,
+    });
+    // ------------------------------------------------
   } catch (err) {
     console.error(err);
   }

@@ -1,3 +1,4 @@
+// src/controller/module/filtermsg.ts
 import { SignalMap, ControllerModule } from "../controller";
 import { DataToDisplay, EdgeDisplay } from "display/data";
 import { DataPortRangeResponse, EdgeData, MetaData } from "data/data";
@@ -21,6 +22,7 @@ const ev = {
   },
   NoCMsgTypeFilter: "FilterNoCMsgType",
   NoCNumHopsFilter: "FilterNoCNumHops",
+  NoCChannelFilter: "FilterNoCChannel", // <-- NEW: filter event for channels
 };
 
 enum InstTypeFilterMode {
@@ -42,9 +44,12 @@ export default class FilterMsg implements ControllerModule {
 
   protected nocMsgTypeTruthTable: TruthTable;
 
-  protected metaInfo!: MetaData;
+  protected metaInfo?: MetaData;
   protected NumHopsDomain!: string[];
   protected nocNumHopsTruthTable!: TruthTable;
+
+  // --- NEW: channel filter truth table (initialized after we see meta) ---
+  protected channelTruthTable: TruthTable = {};
 
   constructor() {
     this.signal = {};
@@ -58,7 +63,7 @@ export default class FilterMsg implements ControllerModule {
       DataOrCommandDomain,
       DataOrCommandDomain
     );
-    this.instTypeFilterMode = InstTypeFilterMode.ByMsgGroup; // filter msg group by default
+    this.instTypeFilterMode = InstTypeFilterMode.ByMsgGroup; // default
 
     // NoC Transferred Msg Type Filter
     this.nocMsgTypeTruthTable = generateTruthTableViaSelectedDomain(
@@ -72,6 +77,7 @@ export default class FilterMsg implements ControllerModule {
       NumHopsDomain
     );
 
+    // Register listeners
     Event.AddStepListener(ev.InstTypeFilter.MsgGroup, (g: string[]) =>
       this.updateInstTypeMsgGroupDomain(g)
     );
@@ -83,6 +89,11 @@ export default class FilterMsg implements ControllerModule {
     );
     Event.AddStepListener(ev.NoCNumHopsFilter, (x: string[]) =>
       this.updateNoCNumHopsDomain(x)
+    );
+
+    // NEW: channel selection event (domain is list of channel indices as strings)
+    Event.AddStepListener(ev.NoCChannelFilter, (chs: string[]) =>
+      this.updateChannelsDomain(chs)
     );
 
     this.initSignalCallbacks();
@@ -103,6 +114,18 @@ export default class FilterMsg implements ControllerModule {
   decorateData(ref: DataPortRangeResponse, d: DataToDisplay) {
     let start = performance.now();
 
+    // --- Lazy init when meta becomes available (first call) ---
+    if (!this.metaInfo) {
+      this.metaInfo = ref.meta;
+      // initialize channel truth table to "all enabled"
+      const NCH = (this.metaInfo.num_channels ?? 1);
+      let fullDomain = Array.from({ length: NCH }, (_, i) => `${i}`);
+      this.channelTruthTable = generateTruthTableViaSelectedDomain(
+        fullDomain,
+        fullDomain
+      );
+    }
+
     if (this.instTypeFilterMode == InstTypeFilterMode.ByMsgGroup) {
       this.aggregate_data(
         ref,
@@ -113,65 +136,49 @@ export default class FilterMsg implements ControllerModule {
       );
     } else {
       alert("! NOT IMPLEMENTED YET");
-      // for (let edge of ref.edges) {
-      //   let detail = edge.detail;
-      //   let weight = 0;
-      //   for (let doc of this.docDomain) {
-      //     let keys = DataOrCommandReverseMap[doc] as string[];
-      //     for (let key of keys) {
-      //       const typeIdx: number = MapMsgTypeToIdx[key];
-      //       const val: number | undefined = edge.value[typeIdx];
-      //       if (val !== undefined && val > 0) {
-      //         detail += `<br>${key}: ${val}`;
-      //         weight += edge.value[typeIdx];
-      //       }
-      //     }
-      //   }
-      //   d.edges.push({
-      //     source: edge.source,
-      //     target: edge.target,
-      //     detail: edge.detail,
-      //     weight: weight,
-      //     // label is tentatively deserted
-      //     label: "" /*weight === 0 ? "" : CompressBigNumber(weight)*/,
-      //   });
-      // }
+      // If you later add DoC mode, keep the same channel-aware indexing used below.
     }
+
     let end = performance.now();
     console.log(`decorateData spend: ${end - start}ms`);
   }
 
+  // --- Channel-aware aggregation with vector order:
+  // transfer_type -> hop_unit -> msg_type -> channel
   aggregate_data(
     ref: DataPortRangeResponse,
     d: DataToDisplay,
-    transfer_filter: (x: string) => boolean, // transfer_type: refers to `classification.ts: TransferTypesInOrder`
-    hops_filter: (x: string) => boolean, // hop_unit: refers to `meta.num_hop_units & meta.hops_per_unit`
-    msg_filter: (x: string) => boolean // msg_type: refers to `classification.ts: MsgTypesInOrder`
+    transfer_filter: (x: string) => boolean, // transfer_type
+    hops_filter: (x: string) => boolean,     // hop_unit
+    msg_filter: (x: string) => boolean       // msg group
   ) {
-    // all 3 filters
     const meta = ref.meta;
     const msg_types = MsgTypesInOrder.length;
+    const NCH = (meta as any).num_channels ?? 1;
+
     for (let edge of ref.edges) {
-      let detail = edge.detail;
       let weight = 0;
       let index = 0;
+
       for (let transfer_type of TransferTypesInOrder) {
-        if (!transfer_filter(transfer_type)) {
-          index += meta.num_hop_units * msg_types;
-          continue;
-        }
+        const tt_ok = transfer_filter(transfer_type);
+
         for (let hop_unit = 0; hop_unit < meta.num_hop_units; hop_unit++) {
-          if (!hops_filter(`${hop_unit}`)) {
-            index += msg_types;
-            continue;
-          }
+          const hop_ok = hops_filter(`${hop_unit}`);
+
           for (let msg_type of MsgTypesInOrder) {
-            if (!msg_filter(MsgGroupsMap[msg_type])) {
-              index++;
-              continue;
+            const msg_ok = msg_filter(MsgGroupsMap[msg_type]);
+
+            // NEW: iterate channels at the innermost level
+            for (let ch = 0; ch < NCH; ch++) {
+              const ch_ok =
+                this.channelTruthTable[`${ch}`] === true;
+
+              if (tt_ok && hop_ok && msg_ok && ch_ok) {
+                weight += edge.value[index];
+              }
+              index++; // ALWAYS advance index to match backing vector layout
             }
-            weight += edge.value[index];
-            index++;
           }
         }
       }
@@ -181,8 +188,7 @@ export default class FilterMsg implements ControllerModule {
         target: edge.target,
         detail: edge.detail,
         weight: weight,
-        // label is tentatively deserted
-        label: "" /*weight === 0 ? "" : CompressBigNumber(weight)*/,
+        label: "" /* optional label omitted */,
       });
     }
   }
@@ -214,6 +220,16 @@ export default class FilterMsg implements ControllerModule {
     this.nocNumHopsTruthTable = generateTruthTableViaSelectedDomain(
       domain,
       NumHopsDomain
+    );
+  }
+
+  // --- NEW: channel domain update ---
+  updateChannelsDomain(domain: string[]) {
+    const NCH = (this.metaInfo?.num_channels ?? 1);
+    const fullDomain = Array.from({ length: NCH }, (_, i) => `${i}`);
+    this.channelTruthTable = generateTruthTableViaSelectedDomain(
+      domain,
+      fullDomain
     );
   }
 }

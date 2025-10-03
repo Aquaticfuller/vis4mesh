@@ -7,3 +7,6 @@ package-lock.json
 
 server/server
 server/random.json
+
+visdata/
+log
