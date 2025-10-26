@@ -233,6 +233,22 @@ export default class FilterMsg implements ControllerModule {
       fullDomain
     );
   }
+
+  public getActiveChannels(): number[] {
+    if (!this.metaInfo) return [];
+    const NCH = this.metaInfo.num_channels ?? 1;
+    const ans: number[] = [];
+    for (let i = 0; i < NCH; i++) {
+      if (this.channelTruthTable[`${i}`]) ans.push(i);
+    }
+    return ans;
+  }
+
+  public getActiveChannelCount(): number {
+    const n = this.getActiveChannels().length;
+    // fall back to all channels if we haven't seen a selection yet
+    return n > 0 ? n : (this.metaInfo?.num_channels ?? 1);
+  }
 }
 
 function generateTruthTableViaSelectedDomain(

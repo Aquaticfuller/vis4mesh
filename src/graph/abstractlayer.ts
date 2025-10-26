@@ -166,11 +166,13 @@ export function BuildAbstractLayers(
   tile_height: number,
   init_scale: number,
   rangedEdges: EdgeDisplay[],
-  timeRange: number
+  timeRange: number,
+  num_channels: number,
+  cycles_per_slice: number
 ): AbstractLayer[] {
   let buildStart = performance.now();
   let layers: AbstractLayer[] = [];
-  let bandwidth = timeRange * 2000;
+  let bandwidth = timeRange * num_channels * cycles_per_slice;
   let start = performance.now();
   layers.push(
     new AbstractLayer(1, tile_height, tile_width, bandwidth, rangedEdges)

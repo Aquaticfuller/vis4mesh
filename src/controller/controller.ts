@@ -5,6 +5,8 @@ import DataWrapper from "data/localport";
 import { BuildAbstractLayers } from "../graph/abstractlayer";
 import { MainView } from "graph/graph";
 import selector from "widget/daisen";
+// src/controller/controller.ts
+import { Module } from "global";  // add this import
 
 export type SignalMap = { [type: string]: (v: any) => any };
 
@@ -54,7 +56,7 @@ export default class Controller {
         edges: [],
       };
       // rebuild abstract layers and render
-
+      const activeChannels = Module.filterMsg.getActiveChannelCount(); // get active channels
       this.modules.forEach((m) => {
         m.decorateData(resp, data);
       });
@@ -65,7 +67,9 @@ export default class Controller {
           resp.meta["height"],
           this.graph.max_scale,
           data.edges,
-          this.endTime - this.startTime
+          this.endTime - this.startTime,
+          activeChannels,
+          resp.meta["slice"]
         )
       );
     } catch (reason) {
