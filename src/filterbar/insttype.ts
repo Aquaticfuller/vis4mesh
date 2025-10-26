@@ -1,12 +1,28 @@
+// src/filterbar/insttype.ts
 import * as d3 from "d3";
 import Event from "event";
 import { ColoredCheckbox } from "widget/colorcheckbox";
 import {
   DataOrCommandDomain,
   MsgGroupsDomain,
-  NumMsgGroups,
   DataOrCommandDomainNameExtend,
 } from "data/classification";
+
+const HIDDEN_GROUP = "Translation";
+
+// Stable, name-based colors (do not recompute by length)
+const GROUP_COLOR: Record<string, string> = {
+  Read:  "#2b83ba", // blue
+  Write: "#d7191c", // red
+  Others:"#fdae61", // orange
+  // "Translation" intentionally omitted/hidden
+};
+
+// Data/Command colors (stable)
+const DOC_COLOR: Record<string, string> = {
+  D: "#2b83ba", // Data -> blue
+  C: "#d7191c", // Command -> red
+};
 
 const outerDiv = d3.select("#filterbar-inst-type");
 
@@ -14,6 +30,9 @@ const title = outerDiv
   .append("p")
   .text("Filter by Instruction Types")
   .style("display", "none");
+
+// Only show visible groups in the UI
+const VisibleMsgGroups = MsgGroupsDomain.filter((g) => g !== HIDDEN_GROUP);
 
 const div = {
   MsgGroup: outerDiv
@@ -26,14 +45,15 @@ const div = {
     .style("display", "none"),
 };
 
-let SelectedMsgGroup = MsgGroupsDomain.reduce(
-  (a, group) => ({ ...a, [group]: true }),
-  {}
-);
+// Init selection: visible groups true; hidden group false.
+let SelectedMsgGroup: Record<string, boolean> = {};
+MsgGroupsDomain.forEach((g) => {
+  SelectedMsgGroup[g] = g !== HIDDEN_GROUP;
+});
 
 let SelectedDataOrCommand = DataOrCommandDomain.reduce(
   (a, group) => ({ ...a, [group]: true }),
-  {}
+  {} as Record<string, boolean>
 );
 
 const ev = {
@@ -44,12 +64,12 @@ const ev = {
 class InstructionTypeFilterBar {
   constructor() {}
 
-  handleSignal(filterMode: /* group or doc*/ string) {
+  handleSignal(filterMode: /* "group" or "doc" */ string) {
     title.style("display", "block");
     if (filterMode === "group") {
       div.DataOrCommand.style("display", "none");
       div.MsgGroup.style("display", "inline-block");
-      const now = MsgGroupsDomain.filter((g) => SelectedMsgGroup[g]);
+      const now = VisibleMsgGroups.filter((g) => SelectedMsgGroup[g]);
       Event.FireEvent(ev.MsgGroup, now);
     } else if (filterMode === "doc") {
       div.DataOrCommand.style("display", "inline-block");
@@ -64,14 +84,12 @@ class InstructionTypeFilterBar {
     this.renderFilterDataOrCommand();
   }
 
-  // Msg group filter
+  // Msg group filter (render only visible groups)
   protected renderFilterMsgGroup() {
-    MsgGroupsDomain.forEach((group, i) => {
-      let box = new ColoredCheckbox()
-        .append({
-          label: group,
-          color: d3.schemeSpectral[NumMsgGroups][i],
-        })
+    VisibleMsgGroups.forEach((group) => {
+      const color = GROUP_COLOR[group] ?? "#888"; // fallback gray if unknown
+      const box = new ColoredCheckbox()
+        .append({ label: group, color })
         .event((val) => this.updateMsgGroup(group, val))
         .static(true);
       div.MsgGroup.append(() => box.node());
@@ -80,17 +98,18 @@ class InstructionTypeFilterBar {
 
   protected updateMsgGroup(group: string, checked: boolean) {
     SelectedMsgGroup[group] = checked;
-    let groups = MsgGroupsDomain.filter((g) => SelectedMsgGroup[g]);
+    const groups = VisibleMsgGroups.filter((g) => SelectedMsgGroup[g]);
     Event.FireEvent(ev.MsgGroup, groups);
   }
 
   // Data/Command filter
   protected renderFilterDataOrCommand() {
-    DataOrCommandDomain.forEach((group, i) => {
-      let box = new ColoredCheckbox()
+    DataOrCommandDomain.forEach((group) => {
+      const color = DOC_COLOR[group] ?? "#888";
+      const box = new ColoredCheckbox()
         .append({
           label: DataOrCommandDomainNameExtend(group),
-          color: ["#d7191c", "#2b83ba"][i],
+          color,
         })
         .event((val) => this.updateDataOrCommand(group, val))
         .static(true);
@@ -100,7 +119,7 @@ class InstructionTypeFilterBar {
 
   protected updateDataOrCommand(group: string, checked: boolean) {
     SelectedDataOrCommand[group] = checked;
-    let groups = DataOrCommandDomain.filter((g) => SelectedDataOrCommand[g]);
+    const groups = DataOrCommandDomain.filter((g) => SelectedDataOrCommand[g]);
     Event.FireEvent(ev.DataOrCommand, groups);
   }
 }

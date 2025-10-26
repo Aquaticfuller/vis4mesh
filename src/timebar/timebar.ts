@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { DataPortFlatResponse } from "data/data";
+import { DataPortFlatResponse, FlatData } from "data/data";
 import StackedChart from "widget/standalone/stackchart";
 import { SVGSelection, StackBarOptions } from "widget/standalone/stackchart";
 import {
@@ -9,8 +9,6 @@ import {
 } from "data/classification";
 import { Component, Element, Module } from "global";
 import Event from "event";
-import { FlatData } from "data/data";
-import selector from "widget/daisen";
 
 const ev = {
   MsgGroup: "FilterMsgGroup",
@@ -18,73 +16,88 @@ const ev = {
 };
 
 const div = d3.select("#timebar-body");
-const colorScheme = d3.schemeSpectral;
-// mapping from group to color, e.g. { "Translations": "red" }
-const fixGroupColor = MsgGroupsDomain.reduce(
-  (a, g, i) => ({ ...a, [g]: colorScheme[NumMsgGroups][i] }),
-  {}
-);
-// mapping from data or command to color, e.g. { "D": "red" }
-const fixDoCColor = DataOrCommandDomain.reduce(
-  (a, g, i) => ({ ...a, [g]: ["#d7191c", "#2b83ba"][i] }),
-  {}
+
+// ==== Stable colors by name (no flipping) =====================
+const GROUP_COLORS: Record<string, string> = {
+  Read: "#2b83ba",
+  Write: "#d7191c",
+  Others: "#fdae61",
+  Translation: "#9e9e9e",
+};
+
+const DOC_COLORS: Record<string, string> = {
+  D: "#2b83ba",
+  C: "#d7191c",
+};
+
+// Hide “Translation” on the timebar
+const TIMEBAR_GROUP_DOMAIN = MsgGroupsDomain.filter((g) => g !== "Translation");
+const TIMEBAR_GROUP_COLORS = TIMEBAR_GROUP_DOMAIN.map(
+  (g) => GROUP_COLORS[g] ?? "#999999"
 );
 
+const TIMEBAR_DOC_DOMAIN = DataOrCommandDomain.slice();
+const TIMEBAR_DOC_COLORS = TIMEBAR_DOC_DOMAIN.map(
+  (d) => DOC_COLORS[d] ?? "#999999"
+);
+
+// ==== Chart options (mutated at render) =======================
 export const opt: StackBarOptions = {
-  x: (d) => d.id,
-  y: (d) => d.count,
-  z: (d) => d.group, // or d.doc
+  x: (d: any) => d.id, // numeric
+  y: (d: any) => d.count,
+  z: (d: any) => d.group, // or d.doc
   width: 0,
   height: 0,
   offset: d3.stackOffsetNone,
   yLabel: "BandWidth(%)",
-  zDomain: MsgGroupsDomain,
-  colors: colorScheme[NumMsgGroups],
-  yFormat: "~s", // SI prefix and trims insignificant trailing zeros
+  zDomain: TIMEBAR_GROUP_DOMAIN,
+  colors: TIMEBAR_GROUP_COLORS,
+  yFormat: "~s",
   yDomain: [0, 100],
 };
 
 let timebar_opt: StackBarOptions = {
-  x: (d) => d.id,
-  y: (d) => d.count,
-  z: (d) => d.group, // or d.doc
+  x: (d: any) => d.id, // numeric
+  y: (d: any) => d.count,
+  z: (d: any) => d.group, // or d.doc
   width: 0,
   height: 0,
   offset: d3.stackOffsetNone,
   yLabel: "Message Count (flits)",
-  zDomain: MsgGroupsDomain,
-  colors: colorScheme[NumMsgGroups],
-  yFormat: "~s", // SI prefix and trims insignificant trailing zeros
+  zDomain: TIMEBAR_GROUP_DOMAIN,
+  colors: TIMEBAR_GROUP_COLORS,
+  yFormat: "~s",
 };
 
 interface FormattedDataForChartByMsgGroups {
-  id: string;
+  id: number;     // numeric slice id
   group: string;
   count: number;
 }
 
 interface FormattedDataForChartByDoC {
-  id: string;
+  id: number;     // numeric slice id
   doc: string;
   count: number;
 }
 
+// ==== Aggregation (make ids numeric) ==========================
 export function handleFlatResponseByMsgGroups(
   data: DataPortFlatResponse
 ): FormattedDataForChartByMsgGroups[] {
   const reduce = d3.flatRollup(
     data,
-    (v) => Number(d3.sum(v, (v) => v.count)),
-    (d) => String(d.id),
-    (d) => d.group
+    (v) => Number(d3.sum(v, (x: any) => x.count)),
+    (d: any) => Number(d.id),
+    (d: any) => d.group
   );
-  return Array.from(reduce, ([id, group, count]) => ({
-    id,
+  const arr = Array.from(reduce, ([id, group, count]) => ({
+    id: Number(id),
     group,
-    count,
-  })).sort(function (a, b) {
-    return d3.ascending(a.group, b.group);
-  });
+    count: Number(count),
+  }));
+  arr.sort((a, b) => d3.ascending(a.id, b.id) || d3.ascending(a.group, b.group));
+  return arr;
 }
 
 function handleFlatResponseByDoC(
@@ -92,37 +105,108 @@ function handleFlatResponseByDoC(
 ): FormattedDataForChartByDoC[] {
   const reduce = d3.flatRollup(
     data,
-    (v) => Number(d3.sum(v, (v) => v.count)),
-    (d) => String(d.id),
-    (d) => d.doc
+    (v) => Number(d3.sum(v, (x: any) => x.count)),
+    (d: any) => Number(d.id),
+    (d: any) => d.doc
   );
-  return Array.from(reduce, ([id, doc, count]) => ({
-    id,
+  const arr = Array.from(reduce, ([id, doc, count]) => ({
+    id: Number(id),
     doc,
-    count,
-  })).sort(function (a, b) {
-    return d3.ascending(a.doc, b.doc);
-  });
+    count: Number(count),
+  }));
+  arr.sort((a, b) => d3.ascending(a.id, b.id) || d3.ascending(a.doc, b.doc));
+  return arr;
 }
 
+// ==== Max flits (pad to elapse) ===============================
 const getMaxFlitsFromFlatResponse = (data: DataPortFlatResponse): number[] => {
-  let res = [];
-  for (let d of data) {
-    if (d.id >= res.length) {
-      res.push(d.max_flits);
-    }
+  const res: number[] = [];
+  for (const d of data as any[]) {
+    const idx = Number(d.id) | 0;
+    while (res.length <= idx) res.push(0);
+    res[idx] = d.max_flits;
   }
   return res;
 };
 
+// ==== Densify to 0..elapse-1 (numeric ids) ====================
+function densifyByGroups(
+  compact: FormattedDataForChartByMsgGroups[],
+  elapse: number,
+  domain: string[]
+): FormattedDataForChartByMsgGroups[] {
+  const key = (s: number, g: string) => `${s}|${g}`;
+  const acc = new Map<string, number>();
+  for (const r of compact) {
+    if (r.id < 0 || r.id >= elapse) continue;
+    if (!domain.includes(r.group)) continue;
+    const k = key(r.id, r.group);
+    acc.set(k, (acc.get(k) ?? 0) + r.count);
+  }
+
+  const out: FormattedDataForChartByMsgGroups[] = [];
+  for (let s = 0; s < elapse; s++) {
+    for (const g of domain) {
+      out.push({
+        id: s,
+        group: g,
+        count: acc.get(key(s, g)) ?? 0,
+      });
+    }
+  }
+  // ensure strict ascending by id
+  out.sort((a, b) => d3.ascending(a.id, b.id) || d3.ascending(a.group, b.group));
+  return out;
+}
+
+function densifyByDoc(
+  compact: FormattedDataForChartByDoC[],
+  elapse: number,
+  domain: string[]
+): FormattedDataForChartByDoC[] {
+  const key = (s: number, d: string) => `${s}|${d}`;
+  const acc = new Map<string, number>();
+  for (const r of compact) {
+    if (r.id < 0 || r.id >= elapse) continue;
+    if (!domain.includes(r.doc)) continue;
+    const k = key(r.id, r.doc);
+    acc.set(k, (acc.get(k) ?? 0) + r.count);
+  }
+
+  const out: FormattedDataForChartByDoC[] = [];
+  for (let s = 0; s < elapse; s++) {
+    for (const d of domain) {
+      out.push({
+        id: s,
+        doc: d,
+        count: acc.get(key(s, d)) ?? 0,
+      });
+    }
+  }
+  out.sort((a, b) => d3.ascending(a.id, b.id) || d3.ascending(a.doc, b.doc));
+  return out;
+}
+
+// ==== Entry points ============================================
 export async function RenderTimebar() {
   console.log("Render Timebar from flat data");
   const resp = await Component.port.flat();
-  RenderTimebarImpl(resp);
+  const range0 = await Component.port.range(0, 0);
+  const elapse = Number(range0?.meta?.elapse) || inferElapseFromFlat(resp);
+  RenderTimebarImpl(resp, elapse);
 }
 
-export function RenderTimebarImpl(resp: FlatData) {
-  const timebar = Element.timebar.loadFlatResponse(resp);
+function inferElapseFromFlat(resp: FlatData): number {
+  let maxId = 0;
+  for (const r of resp as any[]) {
+    const s = Number(r.id) | 0;
+    if (s > maxId) maxId = s;
+  }
+  return maxId + 1;
+}
+
+export function RenderTimebarImpl(resp: FlatData, elapse: number) {
+  const timebar = Element.timebar.loadFlatResponse(resp, elapse);
 
   Component.ticker.setCast((l, r) => timebar.moveBrush(l, r));
   Component.layout.timebar.afterResizing(() => timebar.render());
@@ -137,45 +221,72 @@ export function RenderTimebarImpl(resp: FlatData) {
   timebar.render();
 }
 
+// ==== Timebar class ===========================================
 export default class Timebar {
   protected chart!: StackedChart;
   protected svg!: SVGSelection;
   protected brush!: d3.BrushBehavior<unknown>;
-  protected data!: Object;
+  protected data!: any[];
   protected dataForMsgGroups!: FormattedDataForChartByMsgGroups[];
   protected dataForDoC!: FormattedDataForChartByDoC[];
   protected maxFlits!: number[];
   protected prevBrush: [number, number];
+  protected elapse: number = 0;
 
-  constructor(d?: DataPortFlatResponse) {
+  constructor(d?: DataPortFlatResponse, elapse?: number) {
     this.prevBrush = [0, 0];
     if (d !== undefined) {
-      this.loadFlatResponse(d);
+      this.loadFlatResponse(d, elapse ?? inferElapseFromFlat(d as any));
     }
   }
 
-  loadFlatResponse(d: DataPortFlatResponse): this {
-    this.dataForMsgGroups = handleFlatResponseByMsgGroups(d);
-    this.dataForDoC = handleFlatResponseByDoC(d);
-    this.maxFlits = getMaxFlitsFromFlatResponse(d);
-    // console.log(this.maxFlits);
-    this.data = this.dataForMsgGroups; // filter message groups by default
+  loadFlatResponse(d: DataPortFlatResponse, elapse: number): this {
+    this.elapse = Number(elapse) | 0;
+
+    const byGroups = handleFlatResponseByMsgGroups(d);
+    const byDoc = handleFlatResponseByDoC(d);
+
+    this.dataForMsgGroups = byGroups;
+    this.dataForDoC = byDoc;
+
+    const mf = getMaxFlitsFromFlatResponse(d);
+    while (mf.length < this.elapse) mf.push(0);
+    this.maxFlits = mf;
+
+    const domain = TIMEBAR_GROUP_DOMAIN;
+    this.data = densifyByGroups(this.dataForMsgGroups, this.elapse, domain);
+
+    timebar_opt.x = (r: any) => r.id; // ensure numeric accessor
+    timebar_opt.z = (r: any) => r.group;
+    timebar_opt.zDomain = domain;
+    timebar_opt.colors = domain.map((g) => GROUP_COLORS[g] ?? "#999999");
+
     return this;
   }
 
-  updateMsgGroupDomain(domain: string[]) {
-    timebar_opt.z = (d) => d.group;
+  updateMsgGroupDomain(domainInput: string[]) {
+    let domain = domainInput.filter((d) => d !== "Translation");
+    if (domain.length === 0) domain = TIMEBAR_GROUP_DOMAIN.slice();
+
+    timebar_opt.x = (r: any) => r.id; // numeric
+    timebar_opt.z = (r: any) => r.group;
     timebar_opt.zDomain = domain;
-    timebar_opt.colors = domain.map((d) => fixGroupColor[d]);
-    this.data = this.dataForMsgGroups;
+    timebar_opt.colors = domain.map((d) => GROUP_COLORS[d] ?? "#999999");
+
+    this.data = densifyByGroups(this.dataForMsgGroups, this.elapse, domain);
     this.render();
   }
 
-  updateDataOrCommandDomain(domain: string[]) {
-    timebar_opt.z = (d) => d.doc;
+  updateDataOrCommandDomain(domainInput: string[]) {
+    let domain =
+      domainInput.length > 0 ? domainInput.slice() : TIMEBAR_DOC_DOMAIN.slice();
+
+    timebar_opt.x = (r: any) => r.id; // numeric
+    timebar_opt.z = (r: any) => r.doc;
     timebar_opt.zDomain = domain;
-    timebar_opt.colors = domain.map((d) => fixDoCColor[d]);
-    this.data = this.dataForDoC;
+    timebar_opt.colors = domain.map((d) => DOC_COLORS[d] ?? "#999999");
+
+    this.data = densifyByDoc(this.dataForDoC, this.elapse, domain);
     this.render();
   }
 
@@ -186,14 +297,17 @@ export default class Timebar {
     timebar_opt.width = (div.node() as Element).clientWidth;
     timebar_opt.height = (div.node() as Element).clientHeight - 20;
 
-    let chart = new StackedChart(this.data, timebar_opt);
-    let svg = chart.axis();
+    const chart = new StackedChart(this.data, timebar_opt);
+    const svg = chart.axis();
     svg.attr("id", "stacked-chart");
+
     const saturation_bar = ramp(ColorScheme, this.maxFlits);
     saturation_bar.id = "saturation-bar";
     saturation_bar.style["display"] = "inline-block";
+
     chart.bar(svg);
-    let brush = chart.brush(
+
+    const brush = chart.brush(
       svg,
       (l, r) => {
         Component.ticker.signal["state"]("pause");
@@ -219,7 +333,6 @@ export default class Timebar {
 }
 
 function ColorScheme(lv: number): string {
-  // [0, 9] maps Blue-Yellow-Red color platte
   return d3.interpolateReds(lv / 2000);
 }
 

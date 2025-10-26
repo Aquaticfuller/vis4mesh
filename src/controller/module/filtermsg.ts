@@ -56,7 +56,8 @@ export default class FilterMsg implements ControllerModule {
 
     // Instruction Type Filter
     this.instTypeGroupTruthTable = generateTruthTableViaSelectedDomain(
-      MsgGroupsDomain,
+      // Turn Translation OFF by default:
+      MsgGroupsDomain.filter((g) => g !== "Translation"),
       MsgGroupsDomain
     );
     this.instTypeDoCTruthTable = generateTruthTableViaSelectedDomain(

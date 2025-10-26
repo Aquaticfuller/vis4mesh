@@ -108,6 +108,7 @@ body {
       height: 100%;
       width: 24%;
       float: right;
+      overflow-y: auto;   // make the filter column scrollable
 
       p {
         text-align: left;
@@ -126,6 +127,12 @@ body {
       }
 
       #filterbar-noc-num-hops {
+        position: relative;
+        left: 2px;
+      }
+
+      // keep the new section aligned with the others
+      #filterbar-noc-channels {
         position: relative;
         left: 2px;
       }
