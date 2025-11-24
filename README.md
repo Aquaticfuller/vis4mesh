@@ -1,5 +1,13 @@
 # Vis4Mesh
 
+build:
+npm install
+npm run build
+
+run:
+cd dist
+python3 -m http.server
+
 Vis4Mesh is a visualization tool for designing mesh Network-on-Chips (NoC) and assisting with computer architecture research.
 <!-- 
 <details open><summary>Snapshot of Vis4Mesh v0.2.3 Release</summary><img alt="vis4mesh-v2" width="95%" src="https://github.com/ueqri/vis4mesh/blob/main/doc/v0.2.3.png?raw=true"></details>

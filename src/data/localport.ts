@@ -1,6 +1,6 @@
 import DataPort from "./dataport";
 
-import { MsgTypes, DataOrCommandMap, MsgGroupsMap } from "./classification";
+import { MsgTypes, DataOrCommandMap, MsgGroupsMap, TransferTypesInOrder } from "./classification";
 import {
   MetaData,
   NodeData,
@@ -31,28 +31,28 @@ export default class LocalDataPort extends DataPort {
   }
 
   /**
-   * Build an all-zero EdgeData[] using the shape of the first available edge file.
-   * Falls back to zeroing that shape so value vectors have the correct length/order.
+   * Build an all-zero EdgeData[] using the shape of any available edge file.
+   * (No -1.json; we copy the structure of the earliest slice and zero it.)
    */
   protected async edgeEmptyData(): Promise<EdgeData[]> {
-    // try to use slice 0 as template
     try {
-      const t = JSON.parse(
-        await this.loader.getEdgeFileContent(0)
-      ) as EdgeData[];
+      const tmplText =
+        (await this.loader.getAnyEdgeTemplate()) ||
+        (await this.loader.getEdgeFileContent(this.meta.elapse - 1)) || // try latest
+        "";
+      if (tmplText === "") throw new Error("no edge files");
+      const t = JSON.parse(tmplText) as EdgeData[];
       const zeros = new Array<number>(t[0].value.length).fill(0);
       t.forEach((edge) => {
         edge.value = zeros.slice(); // per-edge clone
       });
       return t;
     } catch (_) {
-      // As a last resort, synthesize an empty list from meta/nodes if no edge file exists at all
-      // (rare: only if edge_prefix_sum is totally empty)
+      // As a last resort, synthesize a zero-valued full edge list
       const edges: EdgeData[] = [];
-      // Build a grid and connect only 4-neighbors (N/E/S/W) with zero vectors
       const W = this.meta.width;
       const H = this.meta.height;
-      const VLEN = 4 * this.meta.num_hop_units * MsgTypes.length; // tt(4) * hops * msg_types
+      const VLEN = 4 * this.meta.num_hop_units * MsgTypes.length;
       const zeros = new Array<number>(VLEN).fill(0);
       const inRange = (x: number, y: number) => x >= 0 && x < W && y >= 0 && y < H;
       for (let y = 0; y < H; y++) {
@@ -150,7 +150,7 @@ export default class LocalDataPort extends DataPort {
       });
       this.overview.sort((a: any, b: any) => a.id - b.id);
 
-      // --- key change: ensure zero slices are present up to meta.elapse ---
+      // Ensure zero slices are present up to meta.elapse
       this.densifyOverview();
     } catch (err) {
       console.error(err);
@@ -173,9 +173,16 @@ export default class LocalDataPort extends DataPort {
     return flat;
   }
 
+  /**
+   * Prefix-sum semantics with sparse frames:
+   * Read nearest-prior cumulative at end-1 and start-1, then subtract.
+   *
+   * If no prior cumulative exists for end-1, return zeros (nothing to show).
+   * If no prior cumulative exists for start-1, treat it as zeros.
+   */
   async range(start: number, end: number) {
-    // console.log(start, end);
-    console.log("range2:", [start, end]);
+    console.log("range (prefix-sum w/ nearest-prior):", [start, end]);
+
     if (start == 0 && end == 0) {
       return {
         meta: this.meta,
@@ -185,38 +192,46 @@ export default class LocalDataPort extends DataPort {
     } else if (end > this.meta.elapse || start >= end || start < 0) {
       throw new Error("Exceeded range in DataPort when calling `range`");
     } else {
-      // Try to read the end frame; if missing, return zeros (so graph displays but shows no traffic)
+      // endpoint A: cumulative at end-1 (nearest prior)
       let edges: EdgeData[];
       try {
-        edges = JSON.parse(
-          await this.loader.getEdgeFileContent(end - 1) // [start, end)
-        ) as EdgeData[];
+        const endText = await this.loader.getEdgeFileContent(end - 1);
+        if (!endText) throw new Error("no end cumulative");
+        edges = JSON.parse(endText) as EdgeData[];
       } catch (_) {
+        // Nothing available up to end-1, no traffic for this window
         edges = await this.edgeEmptyData();
+        return { meta: this.meta, nodes: this.nodes, edges };
       }
 
       const numEdges = edges.length;
       const numMsgTypes = MsgTypes.length;
-      const stride = 4 * this.meta.num_hop_units * numMsgTypes;
+      const stride = this.meta.num_channels *
+                     this.meta.num_hop_units *
+                     numMsgTypes *
+                     TransferTypesInOrder.length;
 
-      if (start != 0) {
-        // subtract prefix at (start - 1); if that file is missing, treat it as zeros
-        try {
-          const redundant = JSON.parse(
-            await this.loader.getEdgeFileContent(start - 1)
-          ) as EdgeData[];
-          for (let i = 0; i < numEdges; i++) {
-            const ev = edges[i].value;
-            const rv = redundant[i]?.value || new Array<number>(stride).fill(0);
-            for (let j = 0; j < stride; j++) ev[j] -= rv[j] || 0;
+      // endpoint B: cumulative at start-1 (nearest prior); if none, it's zero
+      try {
+        if (start !== 0) {
+          const startText = await this.loader.getEdgeFileContent(start - 1);
+          if (startText) {
+            const redundant = JSON.parse(startText) as EdgeData[];
+            for (let i = 0; i < numEdges; i++) {
+              const ev = edges[i].value;
+              const rv = redundant[i]?.value;
+              if (!rv) continue;
+              for (let j = 0; j < stride; j++) ev[j] -= rv[j] || 0;
+            }
           }
-        } catch (_) {
-          // nothing to subtract; it's already a delta against zero
         }
+      } catch (_) {
+        // No prior start cumulative: difference against zero (do nothing)
       }
 
-      // console.log(edges);
-      return { meta: this.meta, nodes: this.nodes, edges: edges };
+      console.log(edges);
+
+      return { meta: this.meta, nodes: this.nodes, edges };
     }
   }
 }

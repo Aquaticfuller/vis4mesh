@@ -4,11 +4,10 @@ export class FileLoader {
   dirEnrties: FileWithDirectoryAndFileHandle[];
   edgeFiles: File[];
 
-  // Cached text of edge_prefix_sum/-1.json if present
-  private zeroEdgeCache?: string;
-
-  // Direct lookup by slice id (e.g., "17.json" -> 17)
+  // Direct lookup by exact slice id (e.g., "17.json" -> 17)
   private edgeFileBySlice: Map<number, File>;
+  // Sorted list of available slice ids for fast nearest-prior lookup
+  private sliceList: number[];
 
   readonly dirEdges = "edge_prefix_sum/";
   readonly dirEdgeHistory = "edgehis/";
@@ -18,6 +17,7 @@ export class FileLoader {
     this.edgeFiles = [];
     this.dirEnrties = dirHandle;
     this.edgeFileBySlice = new Map<number, File>();
+    this.sliceList = [];
     console.log("constructor FileLoader");
   }
 
@@ -41,13 +41,17 @@ export class FileLoader {
       }
     }
 
-    // keep deterministic order for debugging (lookup uses the map)
+    // keep deterministic order for debugging
     this.edgeFiles.sort((a, b) => {
       return this.getFilenameIndex(a.name) - this.getFilenameIndex(b.name);
     });
+
+    // build the sorted slice list once
+    this.sliceList = Array.from(this.edgeFileBySlice.keys()).sort((a, b) => a - b);
+    console.log(`Edge slices detected: [${this.sliceList.join(", ")}]`);
   }
 
-  // getFileContent: expected to be called for three times (meta, flat, nodes)
+  // getFileContent: used for meta/flat/nodes & snapshots
   public async getFileContent(filename: string) {
     const needle = filename + ".json";
     for (const entry of this.dirEnrties) {
@@ -60,10 +64,7 @@ export class FileLoader {
     return "";
   }
 
-  /**
-   * Slice-aware getter (use this in new code).
-   * Returns the file text for {slice}.json, or undefined if that JSON is missing.
-   */
+  /** Exact slice getter: returns the file text for {slice}.json if present. */
   public async getEdgeFileContentBySlice(
     slice: number
   ): Promise<string | undefined> {
@@ -75,37 +76,37 @@ export class FileLoader {
   }
 
   /**
-   * Slice-aware getter with zero fallback.
-   * Returns the file text for {slice}.json; if missing, tries -1.json (all-zero edge).
-   * Returns "" if neither exists (caller can synthesize zeros from meta).
+   * Nearest-prior getter:
+   * returns the file text for the largest slice s <= {slice} that exists.
+   * Returns undefined if there is no slice <= {slice}.
    */
-  public async getEdgeFileContentBySliceOrZero(slice: number): Promise<string> {
-    const txt = await this.getEdgeFileContentBySlice(slice);
-    if (txt !== undefined) return txt;
-
-    const zero = await this.getZeroEdgeFileContent();
-    if (zero !== undefined) {
-      console.warn(`Slice ${slice}.json missing; using -1.json fallback.`);
-      return zero;
-    }
-
-    console.warn(
-      `Slice ${slice}.json and -1.json missing; returning empty string.`
-    );
-    return "";
+  public async getEdgeFileContentNearestLE(
+    slice: number
+  ): Promise<string | undefined> {
+    const s = this.nearestSliceLE(slice);
+    if (s === undefined) return undefined;
+    return this.getEdgeFileContentBySlice(s);
   }
 
   /**
-   * LEGACY NAME kept for compatibility, but now interprets `idx` as a SLICE NUMBER.
-   * Prefer calling getEdgeFileContentBySliceOrZero(slice) explicitly.
+   * LEGACY NAME kept for compatibility.
+   * Now it returns the nearest-prior content for `idx` (or "" if none).
    */
   public async getEdgeFileContent(idx: number) {
-    return this.getEdgeFileContentBySliceOrZero(idx);
+    const txt = await this.getEdgeFileContentNearestLE(idx);
+    return txt ?? "";
   }
 
   /** True iff {slice}.json exists under edge_prefix_sum. */
   public hasEdgeSlice(slice: number): boolean {
     return this.edgeFileBySlice.has(slice);
+  }
+
+  /** Useful for building a zero-shaped template (pick the earliest available). */
+  public async getAnyEdgeTemplate(): Promise<string | undefined> {
+    if (this.sliceList.length === 0) return undefined;
+    const s = this.sliceList[0];
+    return this.getEdgeFileContentBySlice(s);
   }
 
   public async getEdgeSnapshot(name: string) {
@@ -117,21 +118,19 @@ export class FileLoader {
     return parseInt(filename.split(".")[0]); // "37.json" -> 37
   }
 
-  // Read and cache edge_prefix_sum/-1.json (all-zero template) if present.
-  private async getZeroEdgeFileContent(): Promise<string | undefined> {
-    if (this.zeroEdgeCache !== undefined) return this.zeroEdgeCache;
-    for (const entry of this.dirEnrties) {
-      // look only under the edge_prefix_sum directory
-      if (
-        entry.webkitRelativePath.includes(this.dirEdges) &&
-        entry.name === "-1.json"
-      ) {
-        this.zeroEdgeCache = await entry.text();
-        console.log("Using zero-edge fallback: -1.json");
-        return this.zeroEdgeCache;
+  private nearestSliceLE(x: number): number | undefined {
+    const arr = this.sliceList;
+    if (arr.length === 0) return undefined;
+    let lo = 0, hi = arr.length - 1, ans = -1;
+    while (lo <= hi) {
+      const md = (lo + hi) >> 1;
+      if (arr[md] <= x) {
+        ans = md;
+        lo = md + 1;
+      } else {
+        hi = md - 1;
       }
     }
-    console.warn("Zero-edge fallback (-1.json) not found.");
-    return undefined;
+    return ans >= 0 ? arr[ans] : undefined;
   }
 }

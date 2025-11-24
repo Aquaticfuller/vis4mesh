@@ -390,7 +390,7 @@ function isNumeric(value: any) {
 
 function invert(scale: any, min: number, max: number): [number, number] {
   const step: number = scale.step();
-  let dif: number = scale.range()[0] + scale.paddingOuter();
+  let dif: number = scale.range()[0] + scale.paddingOuter() * step;
   let iMin: number, iMax: number;
   if (min == max) {
     // single click in band
@@ -406,6 +406,10 @@ function invert(scale: any, min: number, max: number): [number, number] {
     if (iMin == 0) ++iMax;
     else --iMin;
   }
+  // clamp to domain bounds to avoid undefined mapping at edges
+  const n = scale.domain().length;
+  iMin = Math.max(0, Math.min(n - 1, iMin));
+  iMax = Math.max(iMin + 1, Math.min(n, iMax));
   return [iMin, iMax];
 }
 
