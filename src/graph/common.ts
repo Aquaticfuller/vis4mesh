@@ -37,6 +37,7 @@ export interface LineLink {
   colorLevel: number;
   level: number;
   opacity: number;
+  channel?: number;
 }
 
 export interface LinkText {

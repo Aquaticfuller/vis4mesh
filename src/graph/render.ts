@@ -210,11 +210,14 @@ export class Render {
         sel.attr("stroke-width", d.width * 1.5);
         sel.style("cursor", "pointer");
         const [src, dst] = d.connection;
+        const channelLabel = d.channel !== undefined ? ` (CH${d.channel})` : "";
         if (d.level > 0) {
           return;
         }
         let dstNode = GetLinkDst([d.idx, d.idy], d.direction);
-        sel.append("title").text(`Tile_${d.idx}_${d.idy} ---> ${dstNode}`);
+        sel
+          .append("title")
+          .text(`Tile_${d.idx}_${d.idy} ---> ${dstNode}${channelLabel}`);
         // TooltipInteraction.onEdge([nodeMap[src], nodeMap[dst]]);
       })
       .on("mousemove", function (ev) {
@@ -233,14 +236,16 @@ export class Render {
         const sel = d3.select(this);
         const [src, dst] = d.connection;
         let dstNode = GetLinkDst([d.idx, d.idy], d.direction);
+        const channelLabel = d.channel !== undefined ? ` (CH${d.channel})` : "";
+        const channelId = d.channel !== undefined ? `_ch${d.channel}` : "";
 
         ClickInteraction.onEdge(
           d.level,
-          `Tile_${d.idx}_${d.idy} ---> ${dstNode}`,
+          `Tile_${d.idx}_${d.idy} ---> ${dstNode}${channelLabel}`,
           function () {
             if (d.level === 0 && d.opacity !== 0) {
               let pin = grid.append("circle");
-              let edgeName = `${d.connection[0]}to${d.connection[1]}`;
+              let edgeName = `${d.connection[0]}to${d.connection[1]}${channelId}`;
               let removePins = () => {
                 pin.remove();
                 minimap.RemovePin([d.idx, d.idy]);

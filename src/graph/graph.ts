@@ -54,6 +54,7 @@ export class MainView {
   transform_scale: number = 0; // abstract node, size of scale*scale
   rect_size: number = 0; // reassign each time by this.draw()
   node_size_ratio: number = 0.5;
+  linkDisplayMode: "aggregate" | "physical" = "aggregate";
   readonly client_size: ClientSize = {
     width: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientWidth,
     height: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientHeight,
@@ -78,6 +79,10 @@ export class MainView {
       this.node_size_ratio = step / 100;
       this.update_semantic_zoom(this.lastViewPortX, this.lastViewPortY);
     });
+    Event.AddStepListener("LinkDisplayMode", (mode: string) => {
+      this.linkDisplayMode = mode === "physical" ? "physical" : "aggregate";
+      this.update_semantic_zoom(this.lastViewPortX, this.lastViewPortY);
+    });
   }
 
   loadAbstractLayers(layers: AbstractLayer[]) {
@@ -100,9 +105,12 @@ export class MainView {
   }
 
   filterLinks() {
+    const opacity_base = 1 - this.scale / 4 / this.max_scale;
     for (let link of this.links) {
       link.opacity =
-        link.value != 0 && this.checkedColors[link.colorLevel] === true ? 1 : 0;
+        link.value != 0 && this.checkedColors[link.colorLevel] === true
+          ? opacity_base
+          : 0;
     }
   }
 
@@ -302,26 +310,54 @@ export class MainView {
     let offset = 0.1 * nodes[0].size;
     let directionX = [0, 0, 1, -1];
     let directionY = [1, -1, 0, 0]; // S N E W
+    let lane_spacing = link_width * 0.8;
+    const opacity_base = 1 - this.scale / 4 / this.max_scale;
     for (let node of nodes) {
       let center = {
         x: node.x + half_size,
         y: node.y + half_size,
       };
+      const layerNode = this.dataLoaded
+        ? this.layers[this.level].nodes[node.idx][node.idy]
+        : undefined;
       for (let i = 0; i < 4; i++) {
-        let nx = center.x + half_size * directionX[i] + directionY[i] * offset;
-        let ny = center.y + half_size * directionY[i] + directionX[i] * offset;
-        let endX = nx + link_length * directionX[i];
-        let endY = ny + link_length * directionY[i];
-        if (this.valid_link(endX, endY)) {
-          let link = {
+        const baseValue = layerNode ? layerNode.edgeData[i] : 0;
+        const baseColorLevel = layerNode ? layerNode.edgeLevel[i] : 0;
+        const channelValues =
+          layerNode && layerNode.edgeChannelData
+            ? layerNode.edgeChannelData[i]
+            : [];
+        const channelLevels =
+          layerNode && layerNode.edgeChannelLevel
+            ? layerNode.edgeChannelLevel[i]
+            : [];
+        const connection = [
+          this.nodeXYToID(node.idx, node.idy),
+          this.nodeXYToID(
+            node.idx + directionY[i],
+            node.idy + directionX[i]
+          ),
+        ];
+        const buildLink = (
+          laneShift: number,
+          value: number,
+          colorLevel: number,
+          channel?: number
+        ) => {
+          const sideShift =
+            (i < 2 ? directionY[i] : directionX[i]) * offset + laneShift;
+          const xShift = directionY[i] !== 0 ? sideShift : 0;
+          const yShift = directionY[i] !== 0 ? 0 : sideShift;
+          const nx = center.x + half_size * directionX[i] + xShift;
+          const ny = center.y + half_size * directionY[i] + yShift;
+          const endX = nx + link_length * directionX[i];
+          const endY = ny + link_length * directionY[i];
+          if (!this.valid_link(endX, endY)) {
+            return;
+          }
+          let link: LineLink = {
             start: node,
-            connection: [
-              this.nodeXYToID(node.idx, node.idy),
-              this.nodeXYToID(
-                node.idx + directionY[i],
-                node.idy + directionX[i]
-              ),
-            ],
+            connection: [...connection],
             idx: node.idx,
             idy: node.idy,
             level: this.level,
@@ -330,22 +366,44 @@ export class MainView {
             x2: nx + (link_length - arrow_length) * directionX[i],
             y2: ny + (link_length - arrow_length) * directionY[i],
             width: link_width,
-            value: this.dataLoaded
-              ? this.layers[this.level].nodes[node.idx][node.idy].edgeData[i]
-              : 0,
+            value: value,
             dasharray: Boolean(i & 1) ? "5, 0" : `${dash[0]}, ${dash[1]}`,
             direction: i,
-            colorLevel: this.dataLoaded
-              ? this.layers[this.level].nodes[node.idx][node.idy].edgeLevel[i]
-              : 0,
+            colorLevel: colorLevel,
             opacity: 1,
+            channel: channel,
           };
           link.opacity =
             link.value != 0 && this.checkedColors[link.colorLevel] === true
-              ? 1 - this.scale / 4 / this.max_scale
+              ? opacity_base
               : 0;
           this.width_link_by_map(link);
           links.push(link);
+        };
+
+        const canShowChannels =
+          this.linkDisplayMode === "physical" &&
+          channelValues !== undefined &&
+          channelValues.length > 0;
+        if (canShowChannels) {
+          const lanes = channelValues
+            .map((val, idx) => ({
+              value: val,
+              level: channelLevels?.[idx] ?? baseColorLevel,
+              channel: idx,
+            }))
+            .filter((lane) => lane.value !== 0);
+          if (lanes.length === 0) {
+            buildLink(0, baseValue, baseColorLevel);
+            continue;
+          }
+          const laneCount = lanes.length;
+          lanes.forEach((lane, laneIdx) => {
+            const shift = lane_spacing * (laneIdx - (laneCount - 1) / 2);
+            buildLink(shift, lane.value, lane.level, lane.channel);
+          });
+        } else {
+          buildLink(0, baseValue, baseColorLevel);
         }
       }
     }
@@ -358,6 +416,9 @@ export class MainView {
     let offsetText_2 = this.rect_size * 0.2;
     let sum = 0;
     let texts: LinkText[] = [];
+    if (this.linkDisplayMode === "physical") {
+      return [];
+    }
     for (let link of links) {
       let posX: number;
       let posY: number;

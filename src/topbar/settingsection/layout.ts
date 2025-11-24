@@ -1,11 +1,13 @@
 import { LabelBox } from "widget/labelbox";
 import { SingleSlider } from "widget/singleslider";
+import { RadioButtonGroup } from "widget/radiobutton";
 import Event from "event";
 
 const ev = {
   GridSpacingStep: "GridSpacingStep",
   GridSpacingCover: "GridSpacingCover",
   BirdViewSize: "BirdViewSize",
+  LinkDisplayMode: "LinkDisplayMode",
 };
 
 export default function RenderSettingLayoutSection() {
@@ -48,6 +50,20 @@ export default function RenderSettingLayoutSection() {
           .event((v) => {
             Event.FireEvent(ev.BirdViewSize, v);
           }),
+      ],
+    },
+    {
+      label: "Link display",
+      widgets: [
+        new RadioButtonGroup("link-display-mode")
+          .append(["Aggregate", "Parallel (per-channel)"])
+          .event((v) => {
+            Event.FireEvent(
+              ev.LinkDisplayMode,
+              v === "Parallel (per-channel)" ? "physical" : "aggregate"
+            );
+          })
+          .switch("Aggregate"),
       ],
     },
   ]);

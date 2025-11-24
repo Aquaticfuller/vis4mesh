@@ -49,6 +49,9 @@ export function DirectionOffset(
 
 export function GetLineIdentity(line: LineLink): string {
   let ret = `${line.level}_${line.direction}_${line.start.idx}_${line.start.idy}`;
+  if (line.channel !== undefined) {
+    ret += `_ch${line.channel}`;
+  }
   return ret;
 }
 

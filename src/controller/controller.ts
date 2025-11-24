@@ -69,7 +69,8 @@ export default class Controller {
           data.edges,
           this.endTime - this.startTime,
           activeChannels,
-          resp.meta["slice"]
+          resp.meta["slice"],
+          resp.meta["num_channels"]
         )
       );
     } catch (reason) {

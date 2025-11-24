@@ -8,6 +8,7 @@ export interface EdgeDisplay {
   source: string;
   target: string;
   weight: number;
+  channelWeights?: number[];
   label: string;
   detail: string;
 }

@@ -1,4 +1,3 @@
-import { MsgTypesInOrder } from "data/classification";
 import { EdgeDisplay } from "display/data";
 
 export interface AbstractNode {
@@ -8,6 +7,8 @@ export interface AbstractNode {
   dataFlow: number;
   edgeData: number[];
   edgeLevel: number[];
+  edgeChannelData: number[][];
+  edgeChannelLevel: number[][];
 }
 
 export class AbstractLayer {
@@ -15,6 +16,8 @@ export class AbstractLayer {
   height: number;
   width: number;
   bandwidth: number;
+  active_channels: number;
+  physical_channels: number;
   nodeValueMax: number = 0;
   linkValueMax: number = 0;
   nodes: AbstractNode[][];
@@ -26,12 +29,16 @@ export class AbstractLayer {
     width: number,
     bandwidth: number,
     edges: EdgeDisplay[],
-    subLayer?: AbstractLayer
+    subLayer?: AbstractLayer,
+    active_channels: number = 1,
+    physical_channels?: number
   ) {
     this.scale = scale;
     this.height = height;
     this.width = width;
     this.bandwidth = bandwidth;
+    this.active_channels = active_channels;
+    this.physical_channels = physical_channels ?? active_channels;
     this.nodes = [];
     if (scale === 1) {
       this.nodes = this.buildFromFlatData(height, width, edges);
@@ -42,34 +49,66 @@ export class AbstractLayer {
   }
 
   buildFromPrecedingLayer(subLayer: AbstractLayer) {
-    let valuelength = MsgTypesInOrder.length;
+    this.active_channels = subLayer.active_channels;
+    this.physical_channels = subLayer.physical_channels;
+    const numChannels = this.active_channels;
+
     for (let i = 0; i < this.height; i++) {
       let row: AbstractNode[] = [];
       for (let j = 0; j < this.width; j++) {
         let value: number[] = [0, 0, 0, 0];
+        let channelValue: number[][] = new Array(4)
+          .fill(0)
+          .map(() =>
+            numChannels > 0 ? new Array(numChannels).fill(0) : new Array<number>()
+          );
         let si = i * 4;
         let sj = j * 4;
         let sum = 0;
         for (let k = sj; k < sj + 4; k++) {
           sum += subLayer.nodes[si + 3][k].edgeData[0];
+          if (numChannels > 0) {
+            const subData = subLayer.nodes[si + 3][k].edgeChannelData[0] || [];
+            for (let ch = 0; ch < numChannels; ch++) {
+              channelValue[0][ch] += subData[ch] ?? 0;
+            }
+          }
         }
         value[0] = sum;
 
         sum = 0;
         for (let k = sj; k < sj + 4; k++) {
           sum += subLayer.nodes[si][k].edgeData[1];
+          if (numChannels > 0) {
+            const subData = subLayer.nodes[si][k].edgeChannelData[1] || [];
+            for (let ch = 0; ch < numChannels; ch++) {
+              channelValue[1][ch] += subData[ch] ?? 0;
+            }
+          }
         }
         value[1] = sum;
 
         sum = 0;
         for (let k = si; k < si + 4; k++) {
           sum += subLayer.nodes[k][sj + 3].edgeData[2];
+          if (numChannels > 0) {
+            const subData = subLayer.nodes[k][sj + 3].edgeChannelData[2] || [];
+            for (let ch = 0; ch < numChannels; ch++) {
+              channelValue[2][ch] += subData[ch] ?? 0;
+            }
+          }
         }
         value[2] = sum;
 
         sum = 0;
         for (let k = si; k < si + 4; k++) {
           sum += subLayer.nodes[k][sj].edgeData[3];
+          if (numChannels > 0) {
+            const subData = subLayer.nodes[k][sj].edgeChannelData[3] || [];
+            for (let ch = 0; ch < numChannels; ch++) {
+              channelValue[3][ch] += subData[ch] ?? 0;
+            }
+          }
         }
         value[3] = sum;
 
@@ -86,6 +125,14 @@ export class AbstractLayer {
           level: 0,
           edgeData: value,
           edgeLevel: [0, 0, 0, 0],
+          edgeChannelData: channelValue,
+          edgeChannelLevel: new Array(4)
+            .fill(0)
+            .map(() =>
+              numChannels > 0
+                ? new Array(numChannels).fill(0)
+                : new Array<number>()
+            ),
         });
       }
       this.nodes.push(row);
@@ -109,6 +156,8 @@ export class AbstractLayer {
           level: 0,
           edgeData: value,
           edgeLevel: [0, 0, 0, 0],
+          edgeChannelData: [[], [], [], []],
+          edgeChannelLevel: [[], [], [], []],
         });
       }
       nodes.push(row);
@@ -120,14 +169,26 @@ export class AbstractLayer {
       let y = parseInt(edge.source) % width;
       let dx = Math.floor(parseInt(edge.target) / width);
       let dy = parseInt(edge.target) % width;
+      let dir = -1;
       if (dx === x + 1) {
         nodes[x][y].edgeData[0] = edge.weight;
+        dir = 0;
       } else if (dx === x - 1) {
         nodes[x][y].edgeData[1] = edge.weight;
+        dir = 1;
       } else if (dy === y + 1) {
         nodes[x][y].edgeData[2] = edge.weight;
+        dir = 2;
       } else {
         nodes[x][y].edgeData[3] = edge.weight;
+        dir = 3;
+      }
+      if (dir >= 0 && edge.channelWeights !== undefined) {
+        nodes[x][y].edgeChannelData[dir] = [...edge.channelWeights];
+        this.physical_channels = Math.max(
+          this.physical_channels,
+          edge.channelWeights.length
+        );
       }
       nodes[x][y].dataFlow += edge.weight;
       // this.linkValueMax = Math.max(this.linkValueMax, edge.weight);
@@ -142,16 +203,30 @@ export class AbstractLayer {
 
   initLinearNormalize() {
     // List of upper bound of each edgeLevel at the current rendering
+    const perChannelBandwidth =
+      this.active_channels > 0
+        ? this.bandwidth / this.active_channels
+        : this.bandwidth;
+    const clampLevel = (v: number, denom: number) =>
+      Math.min(9, Math.floor((v * 10) / denom));
     for (let row of this.nodes) {
       for (let node of row) {
         // calc node level
         if (this.nodeValueMax != 0) {
-          node.level = Math.floor((node.dataFlow * 10) / this.bandwidth / 4);
+          node.level = clampLevel(node.dataFlow / 4, this.bandwidth);
         }
         // calc link level
         for (let i = 0; i < 4; i++) {
           let val = node.edgeData[i];
-          node.edgeLevel[i] = Math.floor((val * 10) / this.bandwidth);
+          node.edgeLevel[i] = clampLevel(val, this.bandwidth);
+          if (
+            node.edgeChannelData[i] !== undefined &&
+            node.edgeChannelData[i].length > 0
+          ) {
+            node.edgeChannelLevel[i] = node.edgeChannelData[i].map((v) =>
+              clampLevel(v, perChannelBandwidth)
+            );
+          }
         }
       }
     }
@@ -167,15 +242,28 @@ export function BuildAbstractLayers(
   init_scale: number,
   rangedEdges: EdgeDisplay[],
   timeRange: number,
-  num_channels: number,
-  cycles_per_slice: number
+  active_channels: number,
+  cycles_per_slice: number,
+  physical_channels?: number
 ): AbstractLayer[] {
   let buildStart = performance.now();
   let layers: AbstractLayer[] = [];
-  let bandwidth = timeRange * num_channels * cycles_per_slice;
+  const active_channels_safe = Math.max(active_channels, 1);
+  const physical_channels_safe =
+    physical_channels ?? active_channels_safe;
+  let bandwidth = timeRange * active_channels_safe * cycles_per_slice;
   let start = performance.now();
   layers.push(
-    new AbstractLayer(1, tile_height, tile_width, bandwidth, rangedEdges)
+    new AbstractLayer(
+      1,
+      tile_height,
+      tile_width,
+      bandwidth,
+      rangedEdges,
+      undefined,
+      active_channels_safe,
+      physical_channels_safe
+    )
   );
   let end = performance.now();
   // console.log(`build from source edgeData: time spent ${end - start}ms`);
@@ -189,7 +277,9 @@ export function BuildAbstractLayers(
       tile_width / i,
       bandwidth,
       [],
-      layers[layers.length - 1]
+      layers[layers.length - 1],
+      active_channels_safe,
+      physical_channels_safe
     );
     layers.push(layer);
     let end = performance.now();

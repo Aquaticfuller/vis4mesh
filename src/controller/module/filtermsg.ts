@@ -160,6 +160,7 @@ export default class FilterMsg implements ControllerModule {
     for (let edge of ref.edges) {
       let weight = 0;
       let index = 0;
+      const channelWeights = Array(NCH).fill(0);
 
       for (let transfer_type of TransferTypesInOrder) {
         const tt_ok = transfer_filter(transfer_type);
@@ -174,9 +175,11 @@ export default class FilterMsg implements ControllerModule {
             for (let ch = 0; ch < NCH; ch++) {
               const ch_ok =
                 this.channelTruthTable[`${ch}`] === true;
+              const contribution = edge.value[index];
 
               if (tt_ok && hop_ok && msg_ok && ch_ok) {
-                weight += edge.value[index];
+                weight += contribution;
+                channelWeights[ch] += contribution;
               }
               index++; // ALWAYS advance index to match backing vector layout
             }
@@ -189,6 +192,7 @@ export default class FilterMsg implements ControllerModule {
         target: edge.target,
         detail: edge.detail,
         weight: weight,
+        channelWeights,
         label: "" /* optional label omitted */,
       });
     }
