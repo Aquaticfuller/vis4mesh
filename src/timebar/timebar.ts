@@ -189,7 +189,16 @@ export default class Timebar {
     let chart = new StackedChart(this.data, timebar_opt);
     let svg = chart.axis();
     svg.attr("id", "stacked-chart");
-    const saturation_bar = ramp(ColorScheme, this.maxFlits);
+
+    const peakFlitsPerSlice = d3.max(this.maxFlits) ?? 0;
+    const heatValues =
+      peakFlitsPerSlice > 0
+        ? this.maxFlits.map((v) => v / peakFlitsPerSlice)
+        : this.maxFlits.map(() => 0); // all zero if no traffic
+
+    const saturation_bar = ramp(ColorScheme, heatValues);
+    // const saturation_bar = ramp(ColorScheme, this.maxFlits);
+
     saturation_bar.id = "saturation-bar";
     saturation_bar.style["display"] = "inline-block";
     chart.bar(svg);
@@ -219,8 +228,31 @@ export default class Timebar {
 }
 
 function ColorScheme(lv: number): string {
-  // [0, 9] maps Blue-Yellow-Red color platte
-  return d3.interpolateReds(lv / 2000);
+  // // lv is the measured flit count on the hottest channel in this slice
+  // const portAny = Component.port as any;
+  // const meta = portAny && portAny.meta;
+
+  // console.log(`meta: `, meta, meta.width, meta.height, meta.num_channels, meta.slice);
+
+  // const theoreticalPerSlice = ((meta.width - 1) * meta.height + (meta.height - 1) * meta.width)
+  //                             * meta.num_channels
+  //                             * meta.slice; // total flit capacity of all channels in one slice
+
+  // // utilization = actual / theoretical
+  // const utilization = Math.max(
+  //   0,
+  //   Math.min(1, lv / theoreticalPerSlice)
+  // );
+
+  // console.log(`Slice flits: ${lv}, Theoretical per slice: ${theoreticalPerSlice}, Utilization: ${utilization}`);
+
+  // // map 0..1 utilization to color
+  // return d3.interpolateReds(utilization);
+
+
+  // lv is normalized utilization in [0, 1]
+  const t = Math.max(0, Math.min(1, lv));
+  return d3.interpolateReds(t);
 }
 
 const marginLeft = 40;
