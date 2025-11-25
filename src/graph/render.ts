@@ -7,6 +7,7 @@ import {
 } from "./common";
 import TooltipInteraction from "./interaction/tooltip";
 import ClickInteraction from "./interaction/click";
+import InfoPanel, { InfoRow } from "./interaction/infopanel";
 import {
   ColorScheme,
   GetLinkDst,
@@ -20,8 +21,10 @@ import sidecanvas from "./interaction/sidecanvas";
 import * as d3 from "d3";
 import selector from "widget/daisen";
 import { NodeCaption } from "./common";
+import { CompressBigNumber } from "controller/module/filtermsg";
 
 const node_rim_color = "#599dbb"; // #599dbb
+const directionNames = ["South", "North", "East", "West"];
 
 export class Render {
   mainview: MainView;
@@ -70,6 +73,7 @@ export class Render {
 
   draw_rect(nodes: RectNode[]) {
     const mainview = this.mainview;
+    const renderer = this;
     this.grid
       .selectAll<SVGSVGElement, RectNode>("rect")
       .data<RectNode>(nodes, (d) => GetRectIdentity(d))
@@ -128,8 +132,9 @@ export class Render {
 
         const sel = d3.select(this);
         mainview.click_node_jump(ev, d);
-        if (d.level > 0) {
-          return;
+        if (d.level === 0) {
+          const nodeInfo = renderer.nodeInfoRows(d);
+          InfoPanel.show(`Node Tile_${d.idx}_${d.idy}`, nodeInfo);
         }
         ClickInteraction.onNode(
           d.level,
@@ -178,6 +183,7 @@ export class Render {
 
   draw_line(lines: LineLink[], minimap: Minimap) {
     const mainview = this.mainview;
+    const renderer = this;
     const grid = this.grid;
     let pinMap = this.pinMap;
     // console.log(lines);
@@ -238,6 +244,13 @@ export class Render {
         let dstNode = GetLinkDst([d.idx, d.idy], d.direction);
         const channelLabel = d.channel !== undefined ? ` (CH${d.channel})` : "";
         const channelId = d.channel !== undefined ? `_ch${d.channel}` : "";
+        // Link info panel
+        const layerNode =
+          mainview.layers[mainview.level].nodes[d.idx][d.idy];
+        InfoPanel.show(
+          `Link ${d.connection[0]} -> ${d.connection[1]}${channelLabel}`,
+          renderer.linkInfoRows(d, layerNode.edgeChannelData?.[d.direction])
+        );
 
         ClickInteraction.onEdge(
           d.level,
@@ -303,6 +316,84 @@ export class Render {
         mainview.click_edge_jump(ev, d);
         ev.stopPropagation();
       });
+  }
+
+  private linkInfoRows(d: LineLink, channelData?: number[]): InfoRow[] {
+    const range = this.mainview.timeRange;
+    const rows: InfoRow[] = [];
+    rows.push({ label: "Direction", value: directionNames[d.direction] });
+    rows.push({
+      label: "Channel",
+      value:
+        d.channel !== undefined ? d.channel : "aggregate (all channels)",
+    });
+    rows.push({ label: "From", value: d.connection[0] });
+    rows.push({ label: "To", value: d.connection[1] });
+    rows.push({
+      label: "Time frame",
+      value: `${range.start} → ${range.end}`,
+    });
+    rows.push({
+      label: "Flits",
+      value: CompressBigNumber(d.value),
+    });
+    rows.push({ label: "Level", value: d.colorLevel });
+    if (channelData && channelData.length > 0) {
+      const perChannel = channelData
+        .map((v, i) => `CH${i}: ${CompressBigNumber(v)}`)
+        .join(", ");
+      rows.push({ label: "Per-channel", value: perChannel });
+    }
+    rows.push({ label: "Display mode", value: this.mainview.linkDisplayMode });
+    return rows;
+  }
+
+  private nodeInfoRows(d: RectNode): InfoRow[] {
+    const layer = this.mainview.layers[this.mainview.level];
+    const node = layer.nodes[d.idx][d.idy];
+    const incoming = this.incomingEdgeData(layer, d.idx, d.idy);
+    const outgoing = node.edgeData;
+    const totalOut = outgoing.reduce((a, b) => a + b, 0);
+    const totalIn = incoming.reduce((a, b) => a + b, 0);
+    const range = this.mainview.timeRange;
+
+    const rows: InfoRow[] = [];
+    rows.push({ label: "Node ID", value: `Tile_${d.idx}_${d.idy}` });
+    rows.push({ label: "Position", value: `x=${d.idx}, y=${d.idy}` });
+    rows.push({
+      label: "Time frame",
+      value: `${range.start} → ${range.end}`,
+    });
+    rows.push({ label: "Total out", value: CompressBigNumber(totalOut) });
+    rows.push({ label: "Total in", value: CompressBigNumber(totalIn) });
+    directionNames.forEach((dirName, idx) => {
+      rows.push({
+        label: `Out ${dirName}`,
+        value: CompressBigNumber(outgoing[idx]),
+      });
+      rows.push({
+        label: `In ${dirName}`,
+        value: CompressBigNumber(incoming[idx]),
+      });
+    });
+    return rows;
+  }
+
+  private incomingEdgeData(
+    layer: any,
+    x: number,
+    y: number
+  ): number[] {
+    const incoming = [0, 0, 0, 0]; // S,N,E,W incoming flits
+    // from South -> neighbor at x+1, its North (1)
+    if (x + 1 < layer.height) incoming[0] = layer.nodes[x + 1][y].edgeData[1];
+    // from North -> neighbor at x-1, its South (0)
+    if (x - 1 >= 0) incoming[1] = layer.nodes[x - 1][y].edgeData[0];
+    // from East -> neighbor at y+1, its West (3)
+    if (y + 1 < layer.width) incoming[2] = layer.nodes[x][y + 1].edgeData[3];
+    // from West -> neighbor at y-1, its East (2)
+    if (y - 1 >= 0) incoming[3] = layer.nodes[x][y - 1].edgeData[2];
+    return incoming;
   }
 
   draw_text(texts: LinkText[], rect_size: number) {

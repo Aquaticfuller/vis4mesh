@@ -13,6 +13,7 @@ import {
   ClientSize,
   ZoomWindowSize,
   SubDisplaySize,
+  TimeRange,
 } from "./common";
 import {
   ReverseMapping,
@@ -25,7 +26,7 @@ import {
 const VERBOSE_MODE = false;
 
 const NODE_DEFAULT_COLOR = "#8fbed1"; // #8fbed1
-const MAX_ZOOM_SCALE = 400;
+const MAX_ZOOM_SCALE = 20000;
 
 export class MainView {
   render: Render;
@@ -55,6 +56,10 @@ export class MainView {
   rect_size: number = 0; // reassign each time by this.draw()
   node_size_ratio: number = 0.5;
   linkDisplayMode: "aggregate" | "physical" | "physical_all" = "aggregate";
+  timeRange: TimeRange = { start: 0, end: 0 };
+  zoomBehavior?: d3.ZoomBehavior<SVGSVGElement, unknown>;
+  graphSelection?: d3.Selection<SVGSVGElement, unknown, HTMLElement, any>;
+  initial_scale: number = 1;
   readonly client_size: ClientSize = {
     width: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientWidth,
     height: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientHeight,
@@ -87,11 +92,17 @@ export class MainView {
       }
       this.update_semantic_zoom(this.lastViewPortX, this.lastViewPortY);
     });
+    Event.AddStepListener("ZoomPercent", (pct: number) => {
+      this.set_zoom_percent(pct);
+    });
   }
 
-  loadAbstractLayers(layers: AbstractLayer[]) {
+  loadAbstractLayers(layers: AbstractLayer[], range?: TimeRange) {
     this.dataLoaded = true;
     this.layers = layers;
+    if (range) {
+      this.timeRange = range;
+    }
     // PERFORMANCE: a better way to repaint the nodes and links?
     this.primary_nodes = this.get_primary_nodes();
     this.sub_nodes = this.get_sub_nodes(this.primary_nodes);
@@ -473,12 +484,13 @@ export class MainView {
   }
 
   get_text(links: LineLink[]) {
+    // Only show labels in aggregate mode to avoid clutter in parallel modes
+    if (this.linkDisplayMode !== "aggregate") {
+      return [];
+    }
     let texts: LinkText[] = [];
-    const showZeros =
-      this.linkDisplayMode === "physical_all" ||
-      this.linkDisplayMode === "physical";
     for (let link of links) {
-      if (!showZeros && link.value === 0) {
+      if (link.value === 0) {
         continue;
       }
       let posX = (link.x1 + link.x2) / 2;
@@ -494,8 +506,7 @@ export class MainView {
         x: posX,
         y: posY,
         angle,
-        label:
-          showZeros || link.value !== 0 ? CompressBigNumber(link.value) : "",
+        label: CompressBigNumber(link.value),
         opacity: link.opacity,
       });
     }
@@ -532,10 +543,13 @@ export class MainView {
     this.windowWidth = graph.node()!.clientWidth;
 
     const [initial_translate, initial_scale] = this.initial_transform_param();
+    this.initial_scale = initial_scale;
     if (VERBOSE_MODE) console.log(initial_translate, initial_scale);
     const zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([initial_scale, 1024]);
+      .scaleExtent([initial_scale, MAX_ZOOM_SCALE]);
+    this.zoomBehavior = zoomBehavior;
+    this.graphSelection = graph;
 
     graph
       .call(
@@ -599,6 +613,19 @@ export class MainView {
 
   bottom_layer_node_jump(x: number, y: number) {
     this.view_jump(-(y + 0.5), -(x + 0.5), MAX_ZOOM_SCALE, 500);
+  }
+
+  set_zoom_percent(pct: number) {
+    if (!this.zoomBehavior || !this.graphSelection) return;
+    const k = Math.max(
+      this.initial_scale,
+      Math.min(MAX_ZOOM_SCALE, (Number(pct) || 0) / 100)
+    );
+    this.graphSelection.call(
+      this.zoomBehavior.scaleTo,
+      k,
+      [this.windowWidth / 2, this.windowHeight / 2]
+    );
   }
 
   click_edge_jump(event: any, edge: LineLink) {

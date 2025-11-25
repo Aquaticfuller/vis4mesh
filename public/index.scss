@@ -200,6 +200,61 @@ svg {
 .close-btn:hover {
   opacity: 1;
 }
+
+/* Info panel */
+#info-panel.info-panel {
+  position: fixed;
+  right: 16px;
+  top: 50px;
+  max-width: 320px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #d0d7de;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  color: #1f2933;
+  padding: 10px 12px;
+  z-index: 999;
+  display: none;
+}
+
+.info-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.info-panel__title {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.info-panel__close {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.info-panel__body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  row-gap: 4px;
+  column-gap: 8px;
+  font-size: 12px;
+}
+
+.info-panel__label {
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.info-panel__value {
+  color: #111827;
+  word-break: break-all;
+}
 .close-btn:before,
 .close-btn:after {
   position: absolute;

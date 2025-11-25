@@ -48,6 +48,11 @@ export interface LinkText {
   angle?: number;
 }
 
+export interface TimeRange {
+  start: number;
+  end: number;
+}
+
 export interface ClientSize {
   width: number;
   height: number;

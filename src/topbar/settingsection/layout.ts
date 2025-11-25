@@ -1,6 +1,7 @@
 import { LabelBox } from "widget/labelbox";
 import { SingleSlider } from "widget/singleslider";
 import { RadioButtonGroup } from "widget/radiobutton";
+import { InputBoxWithFloatingLabel } from "widget/input";
 import Event from "event";
 
 const ev = {
@@ -8,6 +9,7 @@ const ev = {
   GridSpacingCover: "GridSpacingCover",
   BirdViewSize: "BirdViewSize",
   LinkDisplayMode: "LinkDisplayMode",
+  ZoomPercent: "ZoomPercent",
 };
 
 export default function RenderSettingLayoutSection() {
@@ -71,6 +73,14 @@ export default function RenderSettingLayoutSection() {
             Event.FireEvent(ev.LinkDisplayMode, mode);
           })
           .switch("Aggregate"),
+        new InputBoxWithFloatingLabel("zoom-percent-input")
+          .append({ label: "Zoom (%)", placeholder: "100" })
+          .event((val: any) => {
+            const num = Number(val);
+            if (!Number.isNaN(num)) {
+              Event.FireEvent(ev.ZoomPercent, num);
+            }
+          }),
       ],
     },
   ]);

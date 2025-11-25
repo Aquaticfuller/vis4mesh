@@ -71,7 +71,8 @@ export default class Controller {
           activeChannels,
           resp.meta["slice"],
           resp.meta["num_channels"]
-        )
+        ),
+        { start: this.startTime, end: this.endTime }
       );
     } catch (reason) {
       console.error(reason);
