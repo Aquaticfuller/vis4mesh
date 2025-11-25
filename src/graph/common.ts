@@ -45,6 +45,7 @@ export interface LinkText {
   y: number;
   label: string;
   opacity: number;
+  angle?: number;
 }
 
 export interface ClientSize {

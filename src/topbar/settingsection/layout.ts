@@ -56,12 +56,19 @@ export default function RenderSettingLayoutSection() {
       label: "Link display",
       widgets: [
         new RadioButtonGroup("link-display-mode")
-          .append(["Aggregate", "Parallel (per-channel)"])
+          .append([
+            "Aggregate",
+            "Parallel (per-channel)",
+            "Parallel (all lanes)",
+          ])
           .event((v) => {
-            Event.FireEvent(
-              ev.LinkDisplayMode,
-              v === "Parallel (per-channel)" ? "physical" : "aggregate"
-            );
+            let mode = "aggregate";
+            if (v === "Parallel (per-channel)") {
+              mode = "physical";
+            } else if (v === "Parallel (all lanes)") {
+              mode = "physical_all";
+            }
+            Event.FireEvent(ev.LinkDisplayMode, mode);
           })
           .switch("Aggregate"),
       ],

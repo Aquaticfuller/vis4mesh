@@ -149,6 +149,7 @@ export class AbstractLayer {
       let row: AbstractNode[] = [];
       for (let j = 0; j < width; j++) {
         let value: number[] = [0, 0, 0, 0];
+        const zeroChannels = new Array(this.physical_channels).fill(0);
         row.push({
           x: i,
           y: j,
@@ -156,8 +157,18 @@ export class AbstractLayer {
           level: 0,
           edgeData: value,
           edgeLevel: [0, 0, 0, 0],
-          edgeChannelData: [[], [], [], []],
-          edgeChannelLevel: [[], [], [], []],
+          edgeChannelData: [
+            [...zeroChannels],
+            [...zeroChannels],
+            [...zeroChannels],
+            [...zeroChannels],
+          ],
+          edgeChannelLevel: [
+            new Array(this.physical_channels).fill(0),
+            new Array(this.physical_channels).fill(0),
+            new Array(this.physical_channels).fill(0),
+            new Array(this.physical_channels).fill(0),
+          ],
         });
       }
       nodes.push(row);
@@ -184,11 +195,16 @@ export class AbstractLayer {
         dir = 3;
       }
       if (dir >= 0 && edge.channelWeights !== undefined) {
-        nodes[x][y].edgeChannelData[dir] = [...edge.channelWeights];
+        const chArr = new Array(this.physical_channels).fill(0);
+        edge.channelWeights.forEach((v, idx) => {
+          if (idx < chArr.length) chArr[idx] = v;
+        });
+        nodes[x][y].edgeChannelData[dir] = chArr;
         this.physical_channels = Math.max(
           this.physical_channels,
           edge.channelWeights.length
         );
+        nodes[x][y].edgeChannelLevel[dir] = chArr.map(() => 0);
       }
       nodes[x][y].dataFlow += edge.weight;
       // this.linkValueMax = Math.max(this.linkValueMax, edge.weight);

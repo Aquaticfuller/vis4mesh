@@ -329,6 +329,11 @@ export class Render {
       .attr("y", (d) => d.y)
       .attr("opacity", (d) => d.opacity)
       .style("fill", "gray")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("transform", (d) =>
+        d.angle ? `rotate(${d.angle}, ${d.x}, ${d.y})` : null
+      )
       .text((d) => d.label)
       .style("font-size", fontsize)
       .raise();

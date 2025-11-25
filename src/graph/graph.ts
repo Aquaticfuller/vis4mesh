@@ -50,11 +50,11 @@ export class MainView {
   captions: NodeCaption[] = [];
   links: LineLink[] = [];
   layers: AbstractLayer[] = [];
-  checkedColors: boolean[] = [];
+  checkedColors: boolean[] = new Array(10).fill(true);
   transform_scale: number = 0; // abstract node, size of scale*scale
   rect_size: number = 0; // reassign each time by this.draw()
   node_size_ratio: number = 0.5;
-  linkDisplayMode: "aggregate" | "physical" = "aggregate";
+  linkDisplayMode: "aggregate" | "physical" | "physical_all" = "aggregate";
   readonly client_size: ClientSize = {
     width: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientWidth,
     height: d3.select<SVGSVGElement, unknown>("#graph").node()!.clientHeight,
@@ -80,7 +80,11 @@ export class MainView {
       this.update_semantic_zoom(this.lastViewPortX, this.lastViewPortY);
     });
     Event.AddStepListener("LinkDisplayMode", (mode: string) => {
-      this.linkDisplayMode = mode === "physical" ? "physical" : "aggregate";
+      if (mode === "physical" || mode === "physical_all") {
+        this.linkDisplayMode = mode;
+      } else {
+        this.linkDisplayMode = "aggregate";
+      }
       this.update_semantic_zoom(this.lastViewPortX, this.lastViewPortY);
     });
   }
@@ -106,11 +110,16 @@ export class MainView {
 
   filterLinks() {
     const opacity_base = 1 - this.scale / 4 / this.max_scale;
+    const min_physical_opacity =
+      this.linkDisplayMode === "physical_all" ? 0.35 : 0;
     for (let link of this.links) {
+      const colorEnabled = this.checkedColors[link.colorLevel] === true;
+      if (!colorEnabled) {
+        link.opacity = 0;
+        continue;
+      }
       link.opacity =
-        link.value != 0 && this.checkedColors[link.colorLevel] === true
-          ? opacity_base
-          : 0;
+        link.value != 0 ? opacity_base : min_physical_opacity;
     }
   }
 
@@ -310,27 +319,41 @@ export class MainView {
     let offset = 0.1 * nodes[0].size;
     let directionX = [0, 0, 1, -1];
     let directionY = [1, -1, 0, 0]; // S N E W
-    let lane_spacing = link_width * 0.8;
+    const isPhysical =
+      this.linkDisplayMode === "physical" ||
+      this.linkDisplayMode === "physical_all";
+    const base_lane_width = isPhysical ? link_width * 0.3 : link_width;
+    const base_lane_spacing = base_lane_width * 0.8;
     const opacity_base = 1 - this.scale / 4 / this.max_scale;
+    const min_physical_opacity =
+      this.linkDisplayMode === "physical_all" ? 0.35 : 0;
     for (let node of nodes) {
       let center = {
         x: node.x + half_size,
         y: node.y + half_size,
       };
+      const maxNodeOffset = Math.max(
+        0,
+        half_size - base_lane_width * (isPhysical ? 1.8 : 1.2)
+      );
+      let node_offset = isPhysical ? offset * 1.35 : offset;
+      node_offset = Math.min(node_offset, maxNodeOffset);
       const layerNode = this.dataLoaded
         ? this.layers[this.level].nodes[node.idx][node.idy]
         : undefined;
       for (let i = 0; i < 4; i++) {
         const baseValue = layerNode ? layerNode.edgeData[i] : 0;
         const baseColorLevel = layerNode ? layerNode.edgeLevel[i] : 0;
+        const physicalChannels =
+          this.layers[this.level]?.physical_channels ?? 0;
         const channelValues =
           layerNode && layerNode.edgeChannelData
             ? layerNode.edgeChannelData[i]
-            : [];
+            : new Array(physicalChannels).fill(0);
         const channelLevels =
           layerNode && layerNode.edgeChannelLevel
             ? layerNode.edgeChannelLevel[i]
-            : [];
+            : new Array(physicalChannels).fill(0);
         const connection = [
           this.nodeXYToID(node.idx, node.idy),
           this.nodeXYToID(
@@ -342,10 +365,23 @@ export class MainView {
           laneShift: number,
           value: number,
           colorLevel: number,
+          laneWidth: number,
           channel?: number
         ) => {
+          const dirBias =
+            i === 0
+              ? 1
+              : i === 1
+              ? -1
+              : i === 2
+              ? 1
+              : -1; // S,N,E,W
+          // Push opposite directions apart more aggressively
+          const biasShift = dirBias * (laneWidth + base_lane_width);
           const sideShift =
-            (i < 2 ? directionY[i] : directionX[i]) * offset + laneShift;
+            (i < 2 ? directionY[i] : directionX[i]) * node_offset +
+            laneShift +
+            biasShift;
           const xShift = directionY[i] !== 0 ? sideShift : 0;
           const yShift = directionY[i] !== 0 ? 0 : sideShift;
           const nx = center.x + half_size * directionX[i] + xShift;
@@ -365,7 +401,7 @@ export class MainView {
             y1: ny,
             x2: nx + (link_length - arrow_length) * directionX[i],
             y2: ny + (link_length - arrow_length) * directionY[i],
-            width: link_width,
+            width: laneWidth,
             value: value,
             dasharray: Boolean(i & 1) ? "5, 0" : `${dash[0]}, ${dash[1]}`,
             direction: i,
@@ -373,10 +409,10 @@ export class MainView {
             opacity: 1,
             channel: channel,
           };
+          const baseOpacity =
+            link.value != 0 ? opacity_base : min_physical_opacity;
           link.opacity =
-            link.value != 0 && this.checkedColors[link.colorLevel] === true
-              ? opacity_base
-              : 0;
+            this.checkedColors[link.colorLevel] === true ? baseOpacity : 0;
           this.width_link_by_map(link);
           links.push(link);
         };
@@ -385,25 +421,51 @@ export class MainView {
           this.linkDisplayMode === "physical" &&
           channelValues !== undefined &&
           channelValues.length > 0;
-        if (canShowChannels) {
-          const lanes = channelValues
-            .map((val, idx) => ({
-              value: val,
-              level: channelLevels?.[idx] ?? baseColorLevel,
-              channel: idx,
-            }))
-            .filter((lane) => lane.value !== 0);
+        const showAllChannels =
+          this.linkDisplayMode === "physical_all" &&
+          channelValues !== undefined &&
+          channelValues.length > 0;
+
+        if (canShowChannels || showAllChannels) {
+          const lanesRaw = channelValues.map((val, idx) => ({
+            value: val,
+            level: channelLevels?.[idx] ?? baseColorLevel,
+            channel: idx,
+          }));
+          const lanes = showAllChannels
+            ? lanesRaw
+            : lanesRaw.filter((lane) => lane.value !== 0);
+
           if (lanes.length === 0) {
-            buildLink(0, baseValue, baseColorLevel);
+            buildLink(0, baseValue, baseColorLevel, base_lane_width);
             continue;
           }
+
           const laneCount = lanes.length;
+          let lane_spacing = base_lane_spacing;
+          let lane_width = base_lane_width;
+          if (laneCount > 1) {
+            const maxSpan = Math.max(
+              0,
+              half_size - node_offset - base_lane_width * 0.6
+            );
+            const nominalSpan =
+              laneCount * lane_width + (laneCount - 1) * lane_spacing;
+            if (nominalSpan > maxSpan && maxSpan > 0) {
+              const scale = maxSpan / nominalSpan;
+              lane_width *= scale;
+              lane_spacing *= scale;
+            }
+          }
+
+          const step = lane_width + lane_spacing;
+          const startShift = (-step * (laneCount - 1)) / 2;
           lanes.forEach((lane, laneIdx) => {
-            const shift = lane_spacing * (laneIdx - (laneCount - 1) / 2);
-            buildLink(shift, lane.value, lane.level, lane.channel);
+            const shift = startShift + laneIdx * step;
+            buildLink(shift, lane.value, lane.level, lane_width, lane.channel);
           });
         } else {
-          buildLink(0, baseValue, baseColorLevel);
+          buildLink(0, baseValue, baseColorLevel, base_lane_width);
         }
       }
     }
@@ -411,51 +473,29 @@ export class MainView {
   }
 
   get_text(links: LineLink[]) {
-    let offsetText_1 = this.rect_size * 0.1;
-    let offsetText_15 = this.rect_size * 0.15;
-    let offsetText_2 = this.rect_size * 0.2;
-    let sum = 0;
     let texts: LinkText[] = [];
-    if (this.linkDisplayMode === "physical") {
-      return [];
-    }
+    const showZeros =
+      this.linkDisplayMode === "physical_all" ||
+      this.linkDisplayMode === "physical";
     for (let link of links) {
-      let posX: number;
-      let posY: number;
-      switch (link.direction) {
-        case 0: {
-          // South
-          posX = link.x1 + offsetText_2;
-          posY = (link.y1 + link.y2) / 2;
-          sum = this.layers[this.level].nodes[link.idx][link.idy].edgeData[0];
-          break;
-        }
-        case 1: {
-          // North
-          posX = link.x1 - offsetText_2;
-          posY = (link.y1 + link.y2) / 2;
-          sum = this.layers[this.level].nodes[link.idx][link.idy].edgeData[1];
-          break;
-        }
-        case 2: {
-          // East
-          posX = (link.x1 + link.x2) / 2;
-          posY = link.y1 + offsetText_1;
-          sum = this.layers[this.level].nodes[link.idx][link.idy].edgeData[2];
-          break;
-        }
-        case 3: {
-          // West
-          posX = (link.x1 + link.x2) / 2;
-          posY = link.y1 - offsetText_15;
-          sum = this.layers[this.level].nodes[link.idx][link.idy].edgeData[3];
-          break;
-        }
+      if (!showZeros && link.value === 0) {
+        continue;
       }
+      let posX = (link.x1 + link.x2) / 2;
+      let posY = (link.y1 + link.y2) / 2;
+      const nudge = link.width * 0.35;
+      if (link.direction === 0) posX += nudge;
+      if (link.direction === 1) posX -= nudge;
+      if (link.direction === 2) posY += nudge;
+      if (link.direction === 3) posY -= nudge;
+      const angle =
+        link.direction === 0 || link.direction === 1 ? -90 : 0;
       texts.push({
-        x: posX!,
-        y: posY!,
-        label: sum === 0 ? "" : CompressBigNumber(sum),
+        x: posX,
+        y: posY,
+        angle,
+        label:
+          showZeros || link.value !== 0 ? CompressBigNumber(link.value) : "",
         opacity: link.opacity,
       });
     }

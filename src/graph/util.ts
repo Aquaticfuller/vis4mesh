@@ -4,6 +4,11 @@ import { LineLink, RectNode } from "./common";
 const directionY = [0, 0, 1, -1];
 const directionX = [1, -1, 0, 0]; // S N E W
 
+const colorScale = d3
+  .scaleLinear<string>()
+  .domain([0, 0.33, 0.66, 1])
+  .range(["#0b4f6c", "#1a936f", "#f6d743", "#d7191c"]);
+
 export function ReverseMapping(
   coord: number[],
   transform: d3.ZoomTransform
@@ -19,8 +24,9 @@ export function ReverseMapping(
 }
 
 export function ColorScheme(lv: number): string {
-  // [0, 9] maps Blue-Yellow-Red color platte
-  return d3.interpolateReds((lv + 1) / 10);
+  // [0, 9] maps Blue-Green-Yellow-Red palette
+  const t = Math.max(0, Math.min(9, lv)) / 9;
+  return colorScale(t);
 }
 
 export function GetLinkDst([x, y]: [number, number], direction: number) {
