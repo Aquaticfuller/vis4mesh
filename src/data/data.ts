@@ -1,3 +1,10 @@
+// Channel group definition: a named toggle that controls a range of channels.
+// Example: { "name": "Wide Req", "channels": [0,1,2,...,31] }
+export interface ChannelGroup {
+  name: string;
+  channels: number[];
+}
+
 export interface MetaData {
   width: number;
   height: number;
@@ -7,6 +14,9 @@ export interface MetaData {
   num_hop_units: number;
   num_channels: number;
   channel_labels?: string[];
+  // Optional grouping of channels for bulk toggle buttons (e.g. Req vs Resp).
+  // If absent, auto-inferred from channel_labels prefixes when possible.
+  channel_groups?: ChannelGroup[];
 }
 
 export interface NodeData {

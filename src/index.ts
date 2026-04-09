@@ -53,6 +53,7 @@ chooseDirButton.addEventListener("click", async () => {
     Element.filterbar.signal["num_channels"]?.({
       n: meta.num_channels ?? 1,
       labels: meta.channel_labels,
+      groups: (meta as any).channel_groups,
     });
     // ------------------------------------------------
   } catch (err) {

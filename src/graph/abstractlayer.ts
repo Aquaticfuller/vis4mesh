@@ -218,36 +218,61 @@ export class AbstractLayer {
   }
 
   initLinearNormalize() {
-    // List of upper bound of each edgeLevel at the current rendering
-    const perChannelBandwidth =
-      this.active_channels > 0
-        ? this.bandwidth / this.active_channels
-        : this.bandwidth;
+    // Find the observed maximum across all edges and channels to use as the
+    // normalization denominator.  The theoretical bandwidth (timeRange * channels
+    // * cycles_per_slice) can be orders of magnitude larger than real traffic,
+    // which collapses the entire color range to level-0 (blue).  Using the
+    // observed max gives a meaningful blue→green→yellow→red gradient.
+    let observedEdgeMax = 0;
+    let observedChannelMax = 0;
+    for (let row of this.nodes) {
+      for (let node of row) {
+        for (let i = 0; i < 4; i++) {
+          observedEdgeMax = Math.max(observedEdgeMax, node.edgeData[i]);
+          if (node.edgeChannelData[i]) {
+            for (const v of node.edgeChannelData[i]) {
+              observedChannelMax = Math.max(observedChannelMax, v);
+            }
+          }
+        }
+      }
+    }
+    // Use the larger of observed max (with 10% headroom) and 1 to avoid div-by-zero.
+    // Fall back to theoretical bandwidth only when traffic is truly zero.
+    const effectiveBandwidth = observedEdgeMax > 0
+      ? observedEdgeMax * 1.1
+      : this.bandwidth;
+    const effectiveChannelBW = observedChannelMax > 0
+      ? observedChannelMax * 1.1
+      : (this.active_channels > 0
+          ? this.bandwidth / this.active_channels
+          : this.bandwidth);
+
     const clampLevel = (v: number, denom: number) =>
-      Math.min(9, Math.floor((v * 10) / denom));
+      Math.min(9, Math.floor((v * 10) / Math.max(denom, 1)));
     for (let row of this.nodes) {
       for (let node of row) {
         // calc node level
         if (this.nodeValueMax != 0) {
-          node.level = clampLevel(node.dataFlow / 4, this.bandwidth);
+          node.level = clampLevel(node.dataFlow / 4, effectiveBandwidth);
         }
         // calc link level
         for (let i = 0; i < 4; i++) {
           let val = node.edgeData[i];
-          node.edgeLevel[i] = clampLevel(val, this.bandwidth);
+          node.edgeLevel[i] = clampLevel(val, effectiveBandwidth);
           if (
             node.edgeChannelData[i] !== undefined &&
             node.edgeChannelData[i].length > 0
           ) {
             node.edgeChannelLevel[i] = node.edgeChannelData[i].map((v) =>
-              clampLevel(v, perChannelBandwidth)
+              clampLevel(v, effectiveChannelBW)
             );
           }
         }
       }
     }
     this.uppers.forEach((u, i) => {
-      this.uppers[i] = Math.floor(((i + 1) * this.bandwidth) / 10);
+      this.uppers[i] = Math.floor(((i + 1) * effectiveBandwidth) / 10);
     });
   }
 }

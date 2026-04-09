@@ -5,7 +5,8 @@ import EdgeTrafficByLegendCheckboxFilterBar from "./edgecheckboxwrapper";
 import InstructionTypeFilterBar from "./insttype";
 import NoCMsgTypeFilterBar from "./nocmsgtype";
 import NoCNumHopsFilterBar from "./numhops";
-import NoCChannelFilterBar from "./channel"; // <-- NEW
+import NoCChannelFilterBar from "./channel"; // <-- channel group toggle support
+import { ChannelGroup } from "data/data";
 
 type SignalMap = { [type: string]: (v: any) => any };
 
@@ -61,8 +62,8 @@ export default class Filterbar {
     // NEW: Provide number of physical NoC channels (and optional labels) from meta
     // Call this once meta is available, e.g. in src/index.ts after port.init()
     // Element.filterbar.signal["num_channels"]({ n: meta.num_channels, labels: meta.channel_labels })
-    this.signal["num_channels"] = (v: { n: number; labels?: string[] }) =>
-      NoCChannelFilterBar.handleSignal(v.n, v.labels);
+    this.signal["num_channels"] = (v: { n: number; labels?: string[]; groups?: ChannelGroup[] }) =>
+      NoCChannelFilterBar.handleSignal(v.n, v.labels, v.groups);
   }
 
   renderFilterEdgeTrafficByLegendCheckbox() {
